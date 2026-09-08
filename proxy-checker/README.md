@@ -19,12 +19,21 @@ passa a fazer isso numa lista de dezenas em vez de dezenas de milhares.
 
 ## Subir na Vercel
 
+Sem build e sem dependencia: `api/` vira funcao e `public/` vira o site.
+
+**Pelo painel (importando este repositorio).** Na tela de *Import Project*, abra **Root Directory** e
+escolha `proxy-checker`. Esse passo nao e opcional: o projeto mora numa subpasta, e apontando para a
+raiz do repositorio a Vercel nao acha nem a `api/` nem a `public/` e sobe um site vazio. O resto fica
+como esta — framework *Other*, sem comando de build.
+
+**Pela linha de comando.**
+
 ```
 cd proxy-checker
 npx vercel deploy --prod
 ```
 
-Sem build, sem dependencia: `api/` vira funcao e `public/` vira o site.
+Aqui o diretorio ja e a raiz do projeto, entao nao ha o que configurar.
 
 ## Endpoints
 
@@ -65,5 +74,13 @@ orcamento de tempo, a ordenacao e a leitura dos tres formatos de lista.
 
 ## Ligar no plugin
 
-Quando estiver no ar, o endereco `/api/proxies?formato=txt` entra como mais uma fonte no `native.ts` do
-GoLiveBypass, junto das publicas — com a diferenca de que essa ja vem peneirada.
+Quando estiver no ar, copie o endereco do endpoint JSON — `https://SEU-PROJETO.vercel.app/api/proxies` —
+e cole em **Settings → Plugins → GoLiveBypass → Your checker URL**.
+
+Com essa URL preenchida o plugin **para de varrer as listas publicas**: passa a consumir so a lista
+daqui, que ja vem peneirada, ordenada e com o pais de cada saida. E o JSON que interessa, nao o
+`?formato=txt`: o texto puro nao carrega o pais, e sem ele o plugin gastaria uma conexao por proxy so
+para redescobrir isso.
+
+As listas publicas ficam de **plano B**, e so quando o checker nao devolve nada (fora do ar, varredura
+vazia). Quando isso acontecer o registro do plugin diz, em vez de voltar a varrer a internet calado.
