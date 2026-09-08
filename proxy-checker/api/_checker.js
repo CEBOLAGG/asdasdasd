@@ -167,11 +167,16 @@ export function sondar(endereco, { conectarMs = 1200, aperoMs = 2500 } = {}) {
         let pronto = false;
         let buffer = Buffer.alloc(0);
 
+        // A porta de recepcao que a proxy anunciou. Sai junto do resultado para que a leitura da
+        // resposta seja verificavel de fora: sem ela, um erro de deslocamento que por acaso caia num
+        // numero diferente de zero classifica a proxy como boa e ninguem percebe.
+        let bindPorta = null;
+
         const fim = () => {
             if (pronto) return;
             pronto = true;
             socket.destroy();
-            resolve({ fase, ms: Date.now() - comecou });
+            resolve({ fase, ms: Date.now() - comecou, bindPorta });
         };
 
         const relogioTcp = setTimeout(fim, conectarMs);
@@ -201,9 +206,31 @@ export function sondar(endereco, { conectarMs = 1200, aperoMs = 2500 } = {}) {
             }
 
             if (fase === "socks5") {
-                if (buffer.length < 2) return;
-                if (buffer[1] === 0) fase = "udp";
+                // A resposta do ASSOCIATE nao termina no byte de sucesso: vem endereco e porta em que a
+                // proxy vai receber os datagramas. Sao 4 bytes de cabecalho + o endereco + 2 de porta.
+                if (buffer.length < 5) return;
+                if (buffer[1] !== 0) { clearTimeout(relogioAperto); return fim(); }
+
+                const tipo = buffer[3];
+                const tamanho = tipo === 1 ? 4 : tipo === 3 ? 1 + buffer[4] : tipo === 4 ? 16 : -1;
+                if (tamanho < 0) { clearTimeout(relogioAperto); return fim(); }
+                if (buffer.length < 4 + tamanho + 2) return;
+
+                // Em try: quem responde do outro lado e uma proxy desconhecida, e uma resposta
+                // malformada nao pode derrubar a varredura inteira -- ela e so mais uma que nao serve.
+                let porta;
+                try { porta = buffer.readUInt16BE(4 + tamanho); }
+                catch { clearTimeout(relogioAperto); return fim(); }
+                bindPorta = porta;
                 clearTimeout(relogioAperto);
+
+                // PORTA ZERO NAO SERVE, e este era o furo: o checker dizia "84 com UDP" e o plugin
+                // achava um punhado, porque boa parte respondia OK e devolvia bind 0.0.0.0:0 -- um
+                // endereco para onde nao da para mandar datagrama nenhum. Contar essas como boas fazia o
+                // numero da tela nao querer dizer nada, e ainda enchia a lista do plugin de endereco que
+                // ele so ia descartar depois de gastar uma sonda em cada.
+                if (porta !== 0) fase = "udp";
+                else fase = "socks5_sem_bind";
                 return fim();
             }
         });
@@ -215,7 +242,7 @@ export function sondar(endereco, { conectarMs = 1200, aperoMs = 2500 } = {}) {
 // nada.
 export async function checar(enderecos, { paralelo = 300, orcamentoMs = 45_000, ...opcoes } = {}) {
     const aprovadas = [];
-    const contagem = { testadas: 0, tcp: 0, socks5: 0, udp: 0 };
+    const contagem = { testadas: 0, tcp: 0, socks5: 0, semBind: 0, udp: 0 };
     const prazo = Date.now() + orcamentoMs;
 
     let proximo = 0;
@@ -226,7 +253,12 @@ export async function checar(enderecos, { paralelo = 300, orcamentoMs = 45_000, 
 
             contagem.testadas++;
             if (fase !== "morta") contagem.tcp++;
-            if (fase === "socks5" || fase === "udp") contagem.socks5++;
+            if (fase === "socks5" || fase === "socks5_sem_bind" || fase === "udp") contagem.socks5++;
+            // Contada a parte, e nao junto das boas: a que aceita o ASSOCIATE e devolve porta 0 e o
+            // tipo mais enganoso que existe aqui -- passa em todo teste rapido e nao entrega nada.
+            // Mostrar quantas sao explica, na propria tela, por que "com UDP" e bem menor que "falam
+            // SOCKS5".
+            if (fase === "socks5_sem_bind") contagem.semBind++;
             if (fase === "udp") { contagem.udp++; aprovadas.push({ endereco, ms }); }
         }
     }

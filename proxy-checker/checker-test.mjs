@@ -14,6 +14,7 @@ function check(nome, ok, detalhe) {
 
 // tipo: "udp" aceita ASSOCIATE | "socks" fala socks5 e recusa | "senha" exige autenticacao
 //       "http" nao e socks5 | "mudo" atende e cala | "morta" nem escuta
+//       "semBind" aceita o ASSOCIATE e devolve 0.0.0.0:0 -- o tipo mais enganoso de todos
 function subir(tipo) {
     return new Promise(resolve => {
         if (tipo === "morta") return resolve({ porta: 1, fechar() { } });
@@ -29,6 +30,30 @@ function subir(tipo) {
                     return c.write(Buffer.from([5, 0]));
                 }
                 // resposta ao ASSOCIATE: 0 = aceito, 7 = comando nao suportado
+                //
+                // A "semBind" responde ACEITO e manda 0.0.0.0:0 como endereco de recepcao. Ela e a que
+                // fazia o numero da tela mentir: passava como boa, e o cliente descobria depois que nao
+                // havia para onde mandar datagrama.
+                if (tipo === "semBind") return c.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
+                // ATYP 3 = nome de dominio, com o tamanho no byte seguinte. Proxy de verdade responde
+                // assim com frequencia, e a porta fica DEPOIS do nome -- ler no lugar fixo daria lixo.
+                // Tipo de endereco que nao existe: nao da para saber onde a porta comeca, entao a
+                // unica resposta honesta e recusar -- e nao chutar um deslocamento.
+                if (tipo === "atypEstranho") return c.write(Buffer.from([5, 0, 0, 9, 1, 2, 3, 4, 0x04, 0x38]));
+                // A resposta chega PARTIDA, como TCP entrega de verdade. Lendo antes de ela fechar, a
+                // porta sai de bytes que ainda nem chegaram.
+                if (tipo === "partida") {
+                    const nome = Buffer.from("relay.exemplo", "utf8");
+                    c.write(Buffer.concat([Buffer.from([5, 0, 0, 3, nome.length]), nome.subarray(0, 5)]));
+                    setTimeout(() => c.write(Buffer.concat([nome.subarray(5), Buffer.from([0x04, 0x38])])), 60);
+                    return;
+                }
+                if (tipo === "dominio") {
+                    const nome = Buffer.from("relay.exemplo", "utf8");
+                    return c.write(Buffer.concat([
+                        Buffer.from([5, 0, 0, 3, nome.length]), nome, Buffer.from([0x04, 0x38])
+                    ]));
+                }
                 c.write(Buffer.from([5, tipo === "udp" ? 0 : 7, 0, 1, 127, 0, 0, 1, 4, 56]));
             });
         });
@@ -36,13 +61,13 @@ function subir(tipo) {
     });
 }
 
-const casos = ["udp", "socks", "senha", "http", "mudo", "morta"];
+const casos = ["udp", "socks", "senha", "http", "mudo", "morta", "semBind", "dominio", "atypEstranho", "partida"];
 const servidores = {};
 for (const t of casos) servidores[t] = await subir(t);
 const endereco = t => `127.0.0.1:${servidores[t].porta}`;
 
 // ---- cada comportamento tem que ser classificado no lugar certo
-for (const [tipo, esperada] of [["udp", "udp"], ["socks", "socks5"], ["senha", "tcp"], ["http", "tcp"], ["mudo", "tcp"], ["morta", "morta"]]) {
+for (const [tipo, esperada] of [["udp", "udp"], ["socks", "socks5"], ["senha", "tcp"], ["http", "tcp"], ["mudo", "tcp"], ["morta", "morta"], ["semBind", "socks5_sem_bind"], ["dominio", "udp"], ["atypEstranho", "socks5"], ["partida", "udp"]]) {
     const r = await sondar(endereco(tipo), { conectarMs: 800, aperoMs: 1200 });
     check(`"${tipo}" e classificada como ${esperada}`, r.fase === esperada, `veio ${r.fase}`);
 }
@@ -50,12 +75,33 @@ for (const [tipo, esperada] of [["udp", "udp"], ["socks", "socks5"], ["senha", "
 // ---- so quem aceita ASSOCIATE entra no resultado
 const todos = casos.map(endereco);
 const { aprovadas, contagem } = await checar(todos, { paralelo: 6, orcamentoMs: 10_000, conectarMs: 800, aperoMs: 1200 });
-check("so a que aceita ASSOCIATE e aprovada",
-    aprovadas.length === 1 && aprovadas[0].endereco === endereco("udp"), JSON.stringify(aprovadas));
-check("a contagem separa as fases", contagem.tcp === 5 && contagem.socks5 === 2 && contagem.udp === 1,
+check("so as que aceitam ASSOCIATE E devolvem bind usavel sao aprovadas",
+    aprovadas.length === 3
+    && aprovadas.some(a => a.endereco === endereco("udp"))
+    && aprovadas.some(a => a.endereco === endereco("dominio")), JSON.stringify(aprovadas));
+check("a contagem separa as fases", contagem.tcp === 9 && contagem.socks5 === 6 && contagem.udp === 3,
     JSON.stringify(contagem));
-check("proxy que exige senha nao passa: o plugin usa proxy aberta", contagem.socks5 === 2,
-    `socks5=${contagem.socks5}`);
+
+// A porta lida, e nao so a classificacao. 0x0438 = 1080, que e o que os dubles anunciam. Sem cobrar o
+// numero, um deslocamento errado que caia por acaso num valor diferente de zero passa como boa.
+for (const tipo of ["dominio", "partida"]) {
+    const r = await sondar(endereco(tipo), { conectarMs: 800, aperoMs: 1200 });
+    check(`a porta de recepcao de "${tipo}" e lida depois do nome, nao num lugar fixo`,
+        r.bindPorta === 1080, `veio ${r.bindPorta}`);
+}
+const doIpv4 = await sondar(endereco("udp"), { conectarMs: 800, aperoMs: 1200 });
+check("e com endereco IPv4 ela sai do lugar certo tambem", doIpv4.bindPorta === 1080,
+    `veio ${doIpv4.bindPorta}`);
+
+// O furo que fazia a tela dizer "84 com UDP" e o plugin achar um punhado: a proxy responde OK ao
+// ASSOCIATE e manda 0.0.0.0:0 como endereco de recepcao. Passa em todo teste rapido e nao entrega nada.
+check("a que promete e nao entrega NAO conta como com UDP", contagem.udp === 3, JSON.stringify(contagem));
+check("mas e contada a parte, para o numero da tela se explicar", contagem.semBind === 1,
+    JSON.stringify(contagem));
+check("e ela conta como quem fala SOCKS5, porque fala mesmo", contagem.socks5 === 6,
+    JSON.stringify(contagem));
+check("proxy que exige senha nao passa: o plugin usa proxy aberta",
+    !aprovadas.some(a => a.endereco === endereco("senha")), JSON.stringify(aprovadas));
 
 // ---- o orcamento de tempo e respeitado, e o que sobrou fica dito
 const muitas = Array.from({ length: 400 }, () => endereco("mudo"));

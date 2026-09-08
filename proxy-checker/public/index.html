@@ -102,7 +102,9 @@
 
   <div class="nota">
     <b>O que este teste prova, e o que nao prova.</b> Ele confirma que o endereco atende, fala SOCKS5 sem
-    senha e <b>aceita</b> o pedido de UDP ASSOCIATE. Ele nao prova que o datagrama atravessa de verdade —
+    senha, <b>aceita</b> o pedido de UDP ASSOCIATE <b>e devolve um endereco de recepcao utilizavel</b> —
+    quem responde "ok" com porta 0 cai em <i>prometem e nao entregam</i>, nao em <i>com UDP</i>.
+    Ele nao prova que o datagrama atravessa de verdade —
     isso exige enviar UDP, e a funcao serverless nao envia. Uma proxy pode aceitar e nao entregar nada; e
     o pior tipo, justamente porque passa em todo teste rapido. Essa ultima prova fica com o cliente, que
     agora precisa faze-la em dezenas de enderecos em vez de dezenas de milhares.
@@ -129,6 +131,10 @@ function pintar(d) {
 
   $("placar").innerHTML = [
     caixa("com UDP", d.udp ?? 0, "verde"),
+    // A que aceita o ASSOCIATE e devolve porta 0 nao entra em "com UDP" -- ela nao entrega datagrama
+    // nenhum. Mostrar quantas sao explica na propria tela por que este numero e bem menor que o de
+    // baixo, em vez de o numero parecer errado.
+    caixa("prometem e nao entregam", d.semBind ?? 0, "amarelo"),
     caixa("falam SOCKS5", d.socks5 ?? 0, ""),
     caixa("atendem TCP", d.tcp ?? 0, ""),
     caixa("testadas", d.testadas ?? 0, ""),
