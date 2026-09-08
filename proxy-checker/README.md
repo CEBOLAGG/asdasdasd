@@ -84,3 +84,9 @@ para redescobrir isso.
 
 As listas publicas ficam de **plano B**, e so quando o checker nao devolve nada (fora do ar, varredura
 vazia). Quando isso acontecer o registro do plugin diz, em vez de voltar a varrer a internet calado.
+
+O endereco precisa ser **https** — que e o que a Vercel entrega de qualquer jeito. Nao e formalidade:
+essa lista escolhe por onde a sua voz vai passar, e baixada em texto puro qualquer um no caminho (o
+Wi-Fi do cafe, o roteador invadido, o provedor) pode trocar a resposta e escolher as proxies no seu
+lugar. `http://` continua valendo para endereco na sua propria maquina ou na rede local, onde nao ha
+caminho publico para alguem se meter; fora dai o plugin recusa e diz por que no registro.
