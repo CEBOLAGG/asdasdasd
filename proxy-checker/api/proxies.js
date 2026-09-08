@@ -47,9 +47,11 @@ export default async function handler(req, res) {
         // E assim que "checar a cada minuto" acontece sem depender de plano pago: passado o minuto, a
         // proxima visita recebe NA HORA a lista da rodada anterior e a CDN dispara a nova varredura por
         // baixo. Ninguem espera, e a lista nunca tem mais de um minuto de idade enquanto houver alguem
-        // (o plugin inclusive) batendo aqui. O cron do vercel.json e o piso disso para quando nao ha
-        // ninguem batendo -- em plano gratuito ele so roda uma vez por dia, e ai quem mantem a coisa
-        // viva e o proprio trafego.
+        // (o plugin inclusive) batendo aqui.
+        //
+        // E por isto que nao ha cron: o plano gratuito da Vercel aceita no maximo um por dia, e um
+        // agendamento mais frequente RECUSA O DEPLOY inteiro em vez de ser ignorado. O cron seria so um
+        // piso para quando nao ha ninguem acessando -- nao vale o projeto nao subir.
         res.setHeader("cache-control", "public, s-maxage=60, stale-while-revalidate=3600");
         res.setHeader("access-control-allow-origin", "*");
 

@@ -51,10 +51,17 @@ baixo (`stale-while-revalidate`). Na pratica: passado o minuto, a proxima visita
 lista da rodada anterior e a varredura nova dispara sozinha. Ninguem espera, e a lista nunca fica com
 mais de um minuto de idade **enquanto houver alguem batendo** — e o plugin bate sozinho a cada 2 min.
 
-O `vercel.json` tambem traz um cron de 1 em 1 minuto, que e o piso disso para quando nao ha ninguem
-acessando. **Atencao ao plano:** no plano gratuito da Vercel o cron so roda uma vez por dia, e o
-agendamento de minuto e simplesmente ignorado. Nao tem problema — quem mantem a lista fresca ali e o
-proprio trafego, pelo mecanismo acima. Com plano pago o cron de 1 minuto vale como agendado.
+Nao ha cron nenhum no `vercel.json`, e de proposito: o plano gratuito da Vercel aceita **no maximo um
+cron por dia**, e um agendamento mais frequente que isso nao e ignorado — ele **recusa o deploy
+inteiro**, com "Hobby accounts are limited to daily cron jobs". Como quem faz a lista se renovar aqui e
+o trafego, o cron seria so um piso para quando nao ha ninguem acessando — e nao vale pagar o preco de o
+projeto nao subir.
+
+Se voce estiver no plano Pro e quiser esse piso, acrescente ao `vercel.json`:
+
+```json
+"crons": [{ "path": "/api/proxies", "schedule": "* * * * *" }]
+```
 
 ## Ajustes por variavel de ambiente
 

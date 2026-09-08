@@ -2,6 +2,7 @@
 //
 // Nao da para testar contra a internet aqui: este ambiente so deixa sair TCP em 80/443, e proxy vive em
 // porta alta. Entao as proxies sao montadas aqui do lado, uma para cada caso que importa.
+import fs from "node:fs";
 import net from "node:net";
 import { sondar, checar, ranquear, lerFonte } from "/home/user/asdasdasd/proxy-checker/api/_checker.js";
 
@@ -96,6 +97,29 @@ check("le JSON com pais", lerFonte(JSON.stringify([{ ip: "7.7.7.7", port: 1, geo
 check("e guarda o pais do JSON", paises.get("7.7.7.7:1") === "AR", paises.get("7.7.7.7:1"));
 lerFonte("6.6.6.6:1080:Brazil\n", paises);
 check("e o pais por extenso do hideip.me", paises.get("6.6.6.6:1080") === "BR", paises.get("6.6.6.6:1080"));
+
+// ---- o vercel.json tem que subir no plano gratuito
+//
+// Esta checagem existe porque ja custou um deploy. Um cron mais frequente que diario nao e ignorado no
+// plano Hobby: ele RECUSA o deploy inteiro ("Hobby accounts are limited to daily cron jobs"), e o
+// projeto simplesmente nao sobe. O piso que o cron daria nao vale isso -- quem renova a lista aqui e o
+// trafego, pelo s-maxage de um minuto.
+const vercel = JSON.parse(fs.readFileSync(new URL("./vercel.json", import.meta.url), "utf8"));
+const crons = vercel.crons ?? [];
+check("o vercel.json nao traz cron mais frequente que diario", crons.every(c => {
+    const [minuto, hora] = String(c.schedule ?? "").split(/\s+/);
+    // Diario e um minuto fixo numa hora fixa. Qualquer coringa ou passo nesses dois campos ja quer
+    // dizer mais de uma vez por dia.
+    return /^\d+$/.test(minuto ?? "") && /^\d+$/.test(hora ?? "");
+}), JSON.stringify(crons));
+
+// maxDuration acima de 60s tambem recusa o deploy no plano gratuito.
+const prazo = vercel.functions?.["api/proxies.js"]?.maxDuration ?? 0;
+check("e o maxDuration cabe no plano gratuito", prazo <= 60, String(prazo));
+// E o orcamento da varredura tem que caber DENTRO dele, senao a funcao e cortada no meio e a resposta
+// se perde -- em vez de devolver o que deu tempo de testar com completou: false.
+check("e o orcamento da varredura cabe dentro do maxDuration",
+    45_000 < prazo * 1000, `orcamento 45000ms, maxDuration ${prazo * 1000}ms`);
 
 for (const t of casos) servidores[t].fechar();
 
