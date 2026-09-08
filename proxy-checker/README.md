@@ -44,8 +44,17 @@ Aqui o diretorio ja e a raiz do projeto, entao nao ha o que configurar.
 | `/api/proxies?formato=txt` | uma por linha, `socks5://ip:porta` |
 | `/api/proxies?limite=50` | corta a lista |
 
-A resposta e cacheada na CDN por 5 min (`stale-while-revalidate` de 1h): a varredura roda raramente e
-quem chega no intervalo recebe a lista anterior na hora, em vez de esperar.
+## Com que frequencia ele testa
+
+A resposta vale **1 minuto** na CDN, e por mais uma hora a CDN serve a anterior enquanto revalida por
+baixo (`stale-while-revalidate`). Na pratica: passado o minuto, a proxima visita recebe **na hora** a
+lista da rodada anterior e a varredura nova dispara sozinha. Ninguem espera, e a lista nunca fica com
+mais de um minuto de idade **enquanto houver alguem batendo** — e o plugin bate sozinho a cada 2 min.
+
+O `vercel.json` tambem traz um cron de 1 em 1 minuto, que e o piso disso para quando nao ha ninguem
+acessando. **Atencao ao plano:** no plano gratuito da Vercel o cron so roda uma vez por dia, e o
+agendamento de minuto e simplesmente ignorado. Nao tem problema — quem mantem a lista fresca ali e o
+proprio trafego, pelo mecanismo acima. Com plano pago o cron de 1 minuto vale como agendado.
 
 ## Ajustes por variavel de ambiente
 
@@ -61,6 +70,16 @@ quem chega no intervalo recebe a lista anterior na hora, em vez de esperar.
 
 O `maxDuration` esta em 60s no `vercel.json`. Se o seu plano nao permitir, baixe ele e o `ORCAMENTO_MS`
 junto — o checker devolve o que deu tempo de testar e marca `completou: false`, em vez de ser cortado.
+
+## As fontes
+
+Sete listas publicas de SOCKS5. A do SoliSpirit (120 mil enderecos varridos em massa) **saiu**: era
+quase toda endereco que nem proxy era, e o punhado que funcionava nao pagava o custo de olhar 120 mil.
+No lugar entraram duas listas **curadas** — `cmahmud/proxies/alive` e `dpangestuw/Free-Proxy` — onde
+quem publica ja testou antes.
+
+O efeito e o que importa: de 119.671 enderecos unicos para **2.340**, muito mais densos. Cabe testar a
+lista INTEIRA dentro do orcamento de tempo, em vez de sortear 40 mil de 120 mil e torcer.
 
 ## Testes
 

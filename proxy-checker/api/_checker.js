@@ -29,7 +29,10 @@ export const FONTES = [
     { nome: "hookzof", url: "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt" },
     { nome: "monosans", url: "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt" },
     { nome: "hideip", url: "https://raw.githubusercontent.com/zloi-user/hideip.me/main/socks5.txt" },
-    { nome: "solispirit", url: "https://raw.githubusercontent.com/SoliSpirit/proxy-list/main/socks5.txt" }
+    // Estas duas sao listas CURADAS: quem publica ja testou antes de publicar. Densidade de acerto
+    // muito maior por endereco olhado do que uma varredura em massa.
+    { nome: "cmahmud", url: "https://raw.githubusercontent.com/cmahmud/proxies/refs/heads/main/alive/socks5.txt" },
+    { nome: "dpangestuw", url: "https://raw.githubusercontent.com/dpangestuw/Free-Proxy/refs/heads/main/socks5_proxies.txt" }
 ];
 
 const PAIS_POR_NOME = new Map([

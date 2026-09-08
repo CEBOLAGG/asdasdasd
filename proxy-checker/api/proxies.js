@@ -42,9 +42,15 @@ export default async function handler(req, res) {
         const ranque = ranquear(aprovadas, paises, origem);
         const lista = limite > 0 ? ranque.slice(0, limite) : ranque;
 
-        // Cinco minutos de cache, e uma hora servindo o antigo enquanto revalida. Quem chega no
-        // intervalo recebe a lista de cinco minutos atras na hora, em vez de esperar a varredura.
-        res.setHeader("cache-control", "public, s-maxage=300, stale-while-revalidate=3600");
+        // UM minuto de validade, e uma hora servindo o antigo enquanto revalida.
+        //
+        // E assim que "checar a cada minuto" acontece sem depender de plano pago: passado o minuto, a
+        // proxima visita recebe NA HORA a lista da rodada anterior e a CDN dispara a nova varredura por
+        // baixo. Ninguem espera, e a lista nunca tem mais de um minuto de idade enquanto houver alguem
+        // (o plugin inclusive) batendo aqui. O cron do vercel.json e o piso disso para quando nao ha
+        // ninguem batendo -- em plano gratuito ele so roda uma vez por dia, e ai quem mantem a coisa
+        // viva e o proprio trafego.
+        res.setHeader("cache-control", "public, s-maxage=60, stale-while-revalidate=3600");
         res.setHeader("access-control-allow-origin", "*");
 
         if (formato === "txt") {
