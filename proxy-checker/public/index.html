@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proxy Checker — SOCKS5 com UDP</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --fundo: #0f1115;
+    --painel: #171a21;
+    --borda: #262b36;
+    --texto: #e6e8ec;
+    --fraco: #8b93a3;
+    --verde: #3ecf8e;
+    --amarelo: #e5b567;
+    --vermelho: #e5787c;
+    --azul: #6aa9ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 20px 60px;
+    background: var(--fundo); color: var(--texto);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .capa { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--fraco); margin: 0 0 22px; font-size: 13px; }
+
+  .placar { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .caixa { background: var(--painel); border: 1px solid var(--borda); border-radius: 8px; padding: 12px 14px; }
+  .caixa b { display: block; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
+  .caixa span { color: var(--fraco); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .verde b { color: var(--verde); }
+  .amarelo b { color: var(--amarelo); }
+
+  .barra { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 16px 0 12px; }
+  button {
+    background: var(--painel); color: var(--texto); border: 1px solid var(--borda);
+    border-radius: 7px; padding: 8px 13px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: #3a4150; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.principal { background: var(--azul); border-color: var(--azul); color: #08101d; font-weight: 600; }
+  .aviso { color: var(--fraco); font-size: 12px; margin-left: auto; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--painel); border: 1px solid var(--borda); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--borda); }
+  th { color: var(--fraco); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+  tr:last-child td { border-bottom: 0; }
+  td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .rolagem { max-height: 460px; overflow: auto; border-radius: 8px; }
+
+  .nota {
+    background: var(--painel); border: 1px solid var(--borda); border-left: 3px solid var(--amarelo);
+    border-radius: 6px; padding: 11px 14px; color: var(--fraco); font-size: 12.5px; margin: 18px 0;
+  }
+  .nota b { color: var(--texto); font-weight: 600; }
+  .fontes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .fonte { background: var(--painel); border: 1px solid var(--borda); border-radius: 20px; padding: 3px 11px; font-size: 12px; color: var(--fraco); }
+  .fonte b { color: var(--texto); font-weight: 600; }
+  .fonte.caiu { border-color: #4a2b2e; color: var(--vermelho); }
+  .vazio { color: var(--fraco); padding: 26px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="capa">
+  <h1>Proxy Checker</h1>
+  <p class="sub">Junta as listas publicas de SOCKS5, testa cada endereco e devolve so o que respondeu — ordenado por latencia e proximidade.</p>
+
+  <div class="placar" id="placar"></div>
+  <div class="fontes" id="fontes"></div>
+
+  <div class="barra">
+    <button class="principal" id="copiar">Copiar lista</button>
+    <button id="baixar">Baixar .txt</button>
+    <button id="recarregar">Recarregar</button>
+    <span class="aviso" id="quando"></span>
+  </div>
+
+  <div class="nota">
+    <b>O que este teste prova, e o que nao prova.</b> Ele confirma que o endereco atende, fala SOCKS5 sem
+    senha e <b>aceita</b> o pedido de UDP ASSOCIATE. Ele nao prova que o datagrama atravessa de verdade —
+    isso exige enviar UDP, e a funcao serverless nao envia. Uma proxy pode aceitar e nao entregar nada; e
+    o pior tipo, justamente porque passa em todo teste rapido. Essa ultima prova fica com o cliente, que
+    agora precisa faze-la em dezenas de enderecos em vez de dezenas de milhares.
+  </div>
+
+  <div class="rolagem">
+    <table>
+      <thead><tr><th>#</th><th>Proxy</th><th>Pais</th><th class="num">Handshake</th><th class="num">Pontos</th><th>Fonte</th></tr></thead>
+      <tbody id="linhas"><tr><td colspan="6" class="vazio">testando…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let dados = null;
+
+function caixa(rotulo, valor, classe) {
+  return `<div class="caixa ${classe || ""}"><b>${valor}</b><span>${rotulo}</span></div>`;
+}
+
+function pintar(d) {
+  dados = d;
+
+  $("placar").innerHTML = [
+    caixa("com UDP", d.udp ?? 0, "verde"),
+    caixa("falam SOCKS5", d.socks5 ?? 0, ""),
+    caixa("atendem TCP", d.tcp ?? 0, ""),
+    caixa("testadas", d.testadas ?? 0, ""),
+    caixa("nas listas", d.totalUnicoNasFontes ?? 0, "")
+  ].join("");
+
+  $("fontes").innerHTML = (d.fontes || []).map(f =>
+    `<span class="fonte ${f.erro ? "caiu" : ""}">${f.fonte} ${f.erro ? "fora do ar" : `<b>${f.novas}</b>`}</span>`
+  ).join("");
+
+  const segundos = Math.round((d.levouMs || 0) / 1000);
+  // "completou: false" nao e erro -- e o orcamento de tempo tendo acabado antes da lista. Dizer isso
+  // e melhor que mostrar um numero que parece final e nao e.
+  $("quando").textContent = `${segundos}s de teste`
+    + (d.completou === false ? " · a lista nao coube no tempo desta rodada" : "")
+    + ` · ${new Date(d.geradoEm).toLocaleString("pt-BR")}`;
+
+  const linhas = (d.proxies || []);
+  $("linhas").innerHTML = linhas.length === 0
+    ? `<tr><td colspan="6" class="vazio">nenhuma passou nesta rodada</td></tr>`
+    : linhas.map((p, i) => `<tr>
+        <td class="num">${i + 1}</td>
+        <td class="mono">${p.proxy}</td>
+        <td>${p.pais}</td>
+        <td class="num">${p.ms} ms</td>
+        <td class="num">${p.pontos}</td>
+        <td>${p.fonte}</td>
+      </tr>`).join("");
+}
+
+function texto() {
+  return (dados?.proxies || []).map(p => p.proxy).join("\n");
+}
+
+async function carregar(forcar) {
+  $("recarregar").disabled = true;
+  $("linhas").innerHTML = `<tr><td colspan="6" class="vazio">testando… isso leva algum tempo na primeira vez</td></tr>`;
+  try {
+    const r = await fetch("/api/proxies" + (forcar ? "?t=" + Date.now() : ""));
+    const d = await r.json();
+    if (d.erro) throw new Error(d.erro);
+    pintar(d);
+  } catch (e) {
+    $("linhas").innerHTML = `<tr><td colspan="6" class="vazio">nao deu: ${e.message}</td></tr>`;
+  } finally {
+    $("recarregar").disabled = false;
+  }
+}
+
+$("copiar").onclick = async () => {
+  await navigator.clipboard.writeText(texto());
+  const b = $("copiar");
+  b.textContent = "Copiado";
+  setTimeout(() => { b.textContent = "Copiar lista"; }, 1400);
+};
+
+$("baixar").onclick = () => {
+  const url = URL.createObjectURL(new Blob([texto()], { type: "text/plain" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "socks5-com-udp.txt";
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+$("recarregar").onclick = () => carregar(true);
+carregar(false);
+</script>
+</body>
+</html>
