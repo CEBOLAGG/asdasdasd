@@ -1,8 +1,10 @@
 // GET /api/proxies
 //
 // Devolve as proxies que passaram, ordenadas. Formatos:
-//   /api/proxies            -> JSON com metadados (o que a interface usa)
-//   /api/proxies?formato=txt -> uma por linha, "socks5://ip:porta" (o que o plugin le)
+//   /api/proxies             -> JSON com metadados. E o que a interface usa, e tambem o que o plugin
+//                               le: so aqui vai o pais de cada saida, e sem ele o plugin gastaria uma
+//                               conexao por proxy para redescobrir isso
+//   /api/proxies?formato=txt -> uma por linha, "socks5://ip:porta", para colar em outra ferramenta
 //   /api/proxies?limite=50   -> corta a lista
 //
 // A conta cara e feita UMA vez e servida do cache da CDN. Sem isso, cada visita a pagina dispararia

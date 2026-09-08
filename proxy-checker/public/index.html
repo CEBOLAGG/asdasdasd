@@ -62,6 +62,15 @@
   .fonte b { color: var(--texto); font-weight: 600; }
   .fonte.caiu { border-color: #4a2b2e; color: var(--vermelho); }
   .vazio { color: var(--fraco); padding: 26px; text-align: center; }
+
+  .ligar { background: var(--painel); border: 1px solid var(--borda); border-left: 3px solid var(--verde);
+           border-radius: 8px; padding: 13px 15px; margin: 16px 0 4px; }
+  .ligar b { display: block; margin-bottom: 7px; }
+  .ligar p { margin: 8px 0 0; color: var(--fraco); font-size: 12.5px; }
+  .endereco { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .endereco code { flex: 1 1 320px; background: var(--fundo); border: 1px solid var(--borda);
+                   border-radius: 6px; padding: 7px 10px; font: 12.5px/1.4 ui-monospace, SFMono-Regular,
+                   Menlo, Consolas, monospace; color: var(--azul); overflow-x: auto; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -77,6 +86,18 @@
     <button id="baixar">Baixar .txt</button>
     <button id="recarregar">Recarregar</button>
     <span class="aviso" id="quando"></span>
+  </div>
+
+  <div class="ligar">
+    <b>Ligar no GoLiveBypass</b>
+    <div class="endereco">
+      <code id="minhaUrl">…</code>
+      <button id="copiarUrl">Copiar</button>
+    </div>
+    <p>Cole em <b>Settings &rarr; Plugins &rarr; GoLiveBypass &rarr; Your checker URL</b>. Com essa URL
+    preenchida o plugin para de varrer as listas publicas e passa a usar so a daqui — que ja vem
+    peneirada, ordenada e com o pais de cada saida. As publicas ficam de plano B, para quando este site
+    nao devolver nada.</p>
   </div>
 
   <div class="nota">
@@ -171,6 +192,18 @@ $("baixar").onclick = () => {
   a.download = "socks5-com-udp.txt";
   a.click();
   URL.revokeObjectURL(url);
+};
+
+// O endereco so existe depois do deploy, entao a pagina monta ele sozinha em vez de pedir para a
+// pessoa adivinhar qual e. E o JSON, nao o ?formato=txt: o texto puro nao carrega o pais.
+const meuEndereco = location.origin + "/api/proxies";
+$("minhaUrl").textContent = meuEndereco;
+
+$("copiarUrl").onclick = async () => {
+  await navigator.clipboard.writeText(meuEndereco);
+  const b = $("copiarUrl");
+  b.textContent = "Copiado";
+  setTimeout(() => { b.textContent = "Copiar"; }, 1400);
 };
 
 $("recarregar").onclick = () => carregar(true);
