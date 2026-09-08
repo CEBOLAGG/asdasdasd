@@ -21,6 +21,7 @@
 // dezenas em vez de dezenas de milhares.
 
 import net from "node:net";
+import tls from "node:tls";
 
 export const FONTES = [
     { nome: "proxyscrape", url: "https://raw.githubusercontent.com/ProxyScrape/free-proxy-list/main/proxies/protocols/socks5/data.txt" },
@@ -265,6 +266,110 @@ export async function checar(enderecos, { paralelo = 300, orcamentoMs = 45_000, 
 
     await Promise.all(Array.from({ length: Math.min(paralelo, enderecos.length) }, trabalhador));
     return { aprovadas, contagem, completou: proximo >= enderecos.length };
+}
+
+// ------------------------------------------------------------------ o pais de saida
+
+// De onde a proxy SAI na internet, perguntado a ela mesma.
+//
+// Isto existe aqui porque estava saindo caro no lugar errado. As listas publicas quase nao trazem pais
+// -- duas das oito trazem --, entao o plugin abria, para cada proxy aprovada, um tunel + TLS + uma
+// volta HTTP ate a Cloudflare so para descobrir isso. Numa proxy gratuita essa volta custa de 2 a 4
+// segundos e falha com facilidade, e o plugin reprovava a proxy por causa dela -- reprovava por uma
+// pergunta que nem era sobre datagrama. O site entregava 79 e sobravam 5.
+//
+// Feito aqui, a volta acontece UMA vez, num servidor com rede de verdade, para todo mundo. Falhar
+// continua sendo aceitavel: a proxy sai com "??" e o plugin a mantem assim.
+function paisPelaProxy(endereco, prazoMs) {
+    return new Promise(resolve => {
+        const corte = endereco.lastIndexOf(":");
+        const host = endereco.slice(0, corte);
+        const porta = Number(endereco.slice(corte + 1));
+
+        let pronto = false;
+        let socket = null;
+        let seguro = null;
+        const fim = pais => {
+            if (pronto) return;
+            pronto = true;
+            try { seguro?.destroy(); } catch { /* ja foi */ }
+            try { socket?.destroy(); } catch { /* ja foi */ }
+            resolve(pais);
+        };
+        const relogio = setTimeout(() => fim(null), prazoMs);
+
+        socket = net.connect({ host, port: porta });
+        socket.on("error", () => fim(null));
+        socket.on("close", () => fim(null));
+
+        let fase = "saudacao";
+        let buffer = Buffer.alloc(0);
+
+        socket.once("connect", () => socket.write(Buffer.from([5, 1, 0])));
+        socket.on("data", pedaco => {
+            if (fase === "tunel") return;
+            buffer = Buffer.concat([buffer, pedaco]);
+
+            if (fase === "saudacao") {
+                if (buffer.length < 2) return;
+                if (buffer[0] !== 5 || buffer[1] !== 0) return fim(null);
+                fase = "connect";
+                buffer = buffer.subarray(2);
+                const alvo = Buffer.from("cloudflare.com", "utf8");
+                socket.write(Buffer.concat([
+                    Buffer.from([5, 1, 0, 3, alvo.length]), alvo, Buffer.from([0x01, 0xbb])
+                ]));
+                return;
+            }
+
+            // CONNECT respondido: 4 de cabecalho + endereco + 2 de porta, como no ASSOCIATE.
+            if (buffer.length < 5) return;
+            if (buffer[1] !== 0) return fim(null);
+            const tipo = buffer[3];
+            const tamanho = tipo === 1 ? 4 : tipo === 3 ? 1 + buffer[4] : tipo === 4 ? 16 : -1;
+            if (tamanho < 0) return fim(null);
+            if (buffer.length < 4 + tamanho + 2) return;
+
+            fase = "tunel";
+            clearTimeout(relogio);
+            const restante = Math.max(500, prazoMs - 200);
+            const relogioTls = setTimeout(() => fim(null), restante);
+
+            seguro = tls.connect({ socket, servername: "cloudflare.com" }, () => {
+                seguro.write("GET /cdn-cgi/trace HTTP/1.1\r\nHost: cloudflare.com\r\nConnection: close\r\n\r\n");
+            });
+            let corpo = "";
+            seguro.on("error", () => { clearTimeout(relogioTls); fim(null); });
+            seguro.on("data", d => {
+                corpo += d.toString("utf8");
+                const achado = /(?:^|\n)loc=([A-Z]{2})/.exec(corpo);
+                if (achado !== null) { clearTimeout(relogioTls); fim(achado[1]); }
+            });
+            seguro.on("end", () => { clearTimeout(relogioTls); fim(null); });
+        });
+    });
+}
+
+// Descobre o pais das aprovadas que ainda nao tem um, dentro de um orcamento proprio.
+//
+// Nao e obrigatorio: quem nao couber no tempo sai com "??" e continua na lista. Melhor uma lista
+// completa com alguns paises desconhecidos do que uma lista curta.
+export async function descobrirPaises(aprovadas, paises, { paralelo = 60, orcamentoMs = 12_000, prazoMs = 6000 } = {}) {
+    const faltando = aprovadas.map(a => a.endereco).filter(e => !paises.has(e));
+    const prazo = Date.now() + orcamentoMs;
+    let proximo = 0;
+    let achados = 0;
+
+    async function trabalhador() {
+        while (proximo < faltando.length && Date.now() < prazo) {
+            const endereco = faltando[proximo++];
+            const pais = await paisPelaProxy(endereco, prazoMs);
+            if (pais !== null) { paises.set(endereco, pais); achados++; }
+        }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(paralelo, faltando.length) }, trabalhador));
+    return { pedidos: faltando.length, achados };
 }
 
 export function ranquear(aprovadas, paises, origem) {

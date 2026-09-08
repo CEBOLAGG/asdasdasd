@@ -4,7 +4,7 @@
 // porta alta. Entao as proxies sao montadas aqui do lado, uma para cada caso que importa.
 import fs from "node:fs";
 import net from "node:net";
-import { sondar, checar, ranquear, lerFonte } from "/home/user/asdasdasd/proxy-checker/api/_checker.js";
+import { sondar, checar, ranquear, lerFonte, descobrirPaises } from "/home/user/asdasdasd/proxy-checker/api/_checker.js";
 
 const resultados = [];
 function check(nome, ok, detalhe) {
@@ -143,6 +143,41 @@ check("le JSON com pais", lerFonte(JSON.stringify([{ ip: "7.7.7.7", port: 1, geo
 check("e guarda o pais do JSON", paises.get("7.7.7.7:1") === "AR", paises.get("7.7.7.7:1"));
 lerFonte("6.6.6.6:1080:Brazil\n", paises);
 check("e o pais por extenso do hideip.me", paises.get("6.6.6.6:1080") === "BR", paises.get("6.6.6.6:1080"));
+
+// ---- descobrir o pais nao pode custar proxy da lista
+//
+// Este e o ponto que ja quebrou do outro lado: o plugin abria uma volta ate a Cloudflare por proxy so
+// para saber o pais e, quando ela falhava, REPROVAVA a proxy -- por uma pergunta que nem era sobre
+// datagrama. O site entregava 79 e sobravam 5. Aqui a volta acontece uma vez, e falhar tem que ser
+// aceitavel: sai "??" e a proxy continua na lista.
+const paisesTeste = new Map();
+const aprovadasTeste = [
+    { endereco: endereco("udp"), ms: 5 },       // fala socks5, mas recusa CONNECT -> nao da para saber
+    { endereco: endereco("morta"), ms: 5 },     // nem escuta
+    { endereco: endereco("dominio"), ms: 5 }
+];
+paisesTeste.set(endereco("dominio"), "US");    // esta ja veio com pais da propria lista
+
+const geo = await descobrirPaises(aprovadasTeste, paisesTeste, { paralelo: 4, orcamentoMs: 4000, prazoMs: 800 });
+check("so procura pais de quem ainda nao tem", geo.pedidos === 2, JSON.stringify(geo));
+check("quem ja tinha pais nao e mexida", paisesTeste.get(endereco("dominio")) === "US",
+    paisesTeste.get(endereco("dominio")));
+
+const comGeo = ranquear(aprovadasTeste, paisesTeste, new Map());
+check("nenhuma proxy some por nao se saber o pais dela", comGeo.length === 3, JSON.stringify(comGeo));
+check("as sem pais saem como ??",
+    comGeo.filter(p => p.pais === "??").length === 2, JSON.stringify(comGeo.map(p => p.pais)));
+// "??" paga o fator de pais mais alto: qualquer saida de pais conhecido passa na frente dela, mas ela
+// continua utilizavel como reserva -- que e melhor que nao ter reserva nenhuma.
+check("e ficam atras da que tem pais conhecido", comGeo[0].pais === "US", JSON.stringify(comGeo.map(p => p.pais)));
+
+// O orcamento e um teto de verdade: sem ele, uma leva de proxies mudas seguraria a funcao inteira ate
+// a Vercel cortar, e a resposta se perderia.
+const mudas = Array.from({ length: 40 }, () => ({ endereco: endereco("mudo"), ms: 5 }));
+const geoT0 = Date.now();
+await descobrirPaises(mudas, new Map(), { paralelo: 4, orcamentoMs: 1200, prazoMs: 5000 });
+const geoLevou = Date.now() - geoT0;
+check("o orcamento da descoberta de pais e respeitado", geoLevou < 8000, `levou ${geoLevou}ms`);
 
 // ---- o vercel.json tem que subir no plano gratuito
 //

@@ -10,7 +10,7 @@
 // A conta cara e feita UMA vez e servida do cache da CDN. Sem isso, cada visita a pagina dispararia
 // uma varredura de dezenas de milhares de enderecos -- o que, alem de lento, viraria um pequeno ataque
 // contra as listas publicas.
-import { juntarFontes, checar, ranquear } from "./_checker.js";
+import { juntarFontes, checar, ranquear, descobrirPaises } from "./_checker.js";
 
 // De onde saem os numeros: da variavel de ambiente quando houver, senao de um padrao conservador que
 // cabe no tempo de funcao do plano gratuito.
@@ -37,6 +37,20 @@ export default async function handler(req, res) {
             orcamentoMs: numero("ORCAMENTO_MS", 45_000),
             conectarMs: numero("CONECTAR_MS", 1200),
             aperoMs: numero("APERTO_MS", 2500)
+        });
+
+        // O pais de cada aprovada, descoberto AQUI.
+        //
+        // As listas publicas quase nao trazem pais, e sem ele o plugin abria uma volta ate a Cloudflare
+        // por proxy, na maquina de quem usa -- 2 a 4 segundos cada, falhando com facilidade. Feito uma
+        // vez aqui, num servidor com rede de verdade, todo mundo recebe a lista ja com o pais.
+        //
+        // So para as APROVADAS (dezenas, nao milhares) e com orcamento proprio: quem nao couber no
+        // tempo sai como "??" e continua na lista.
+        const geo = await descobrirPaises(aprovadas, paises, {
+            paralelo: numero("GEO_PARALELO", 60),
+            orcamentoMs: numero("GEO_ORCAMENTO_MS", 12_000),
+            prazoMs: numero("GEO_PRAZO_MS", 6000)
         });
 
         const ranque = ranquear(aprovadas, paises, origem);
@@ -70,6 +84,10 @@ export default async function handler(req, res) {
             candidatas: enderecos.length,
             totalUnicoNasFontes: totalUnico,
             ...contagem,
+            // Quantas ficaram sem pais. E o numero que explica um ranking cheio de "??" -- em vez de
+            // parecer que o site esqueceu de preencher.
+            semPais: ranque.filter(p => p.pais === "??").length,
+            geo,
             fontes: resumo,
             // O que este checker NAO prova, dito no proprio corpo da resposta para nao virar
             // mal-entendido: a Vercel nao envia UDP, entao "udp" aqui quer dizer que a proxy ACEITOU o
