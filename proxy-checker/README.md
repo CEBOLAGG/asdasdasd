@@ -100,8 +100,12 @@ orcamento de tempo, a ordenacao e a leitura dos tres formatos de lista.
 
 ## Ligar no plugin
 
-Quando estiver no ar, copie o endereco do endpoint JSON — `https://SEU-PROJETO.vercel.app/api/proxies` —
-e cole em **Settings → Plugins → GoLiveBypass → Your checker URL**.
+O plugin **ja vem apontado** para `https://asdasdasd-ochre-tau.vercel.app/api/proxies`, entao quem
+instala nao precisa configurar nada. Este README serve para quem quer subir o proprio.
+
+Quando o seu estiver no ar, copie o endereco do endpoint JSON —
+`https://SEU-PROJETO.vercel.app/api/proxies` — e cole em **Settings → Plugins → GoLiveBypass →
+Checker URL**, ou no campo **checker site** da janela de registro, que tem os botoes *Use* e *Reset*.
 
 Com essa URL preenchida o plugin **para de varrer as listas publicas**: passa a consumir so a lista
 daqui, que ja vem peneirada, ordenada e com o pais de cada saida. E o JSON que interessa, nao o
