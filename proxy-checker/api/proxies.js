@@ -10,7 +10,7 @@
 // A conta cara e feita UMA vez e servida do cache da CDN. Sem isso, cada visita a pagina dispararia
 // uma varredura de dezenas de milhares de enderecos -- o que, alem de lento, viraria um pequeno ataque
 // contra as listas publicas.
-import { juntarFontes, checar, ranquear, descobrirPaises, lerMinhas } from "./_checker.js";
+import { juntarFontes, checar, ranquear, descobrirPaises, lerMinhas, temCredencial } from "./_checker.js";
 
 // De onde saem os numeros: da variavel de ambiente quando houver, senao de um padrao conservador que
 // cabe no tempo de funcao do plano gratuito.
@@ -18,6 +18,16 @@ const numero = (nome, padrao) => {
     const bruto = Number(process.env[nome]);
     return Number.isFinite(bruto) && bruto > 0 ? bruto : padrao;
 };
+
+// Le o corpo de um POST. Credencial vem por aqui, e nao pela URL.
+function lerCorpo(req) {
+    return new Promise(resolve => {
+        let bruto = "";
+        req.on("data", p => { bruto += p; if (bruto.length > 64 * 1024) { bruto = ""; req.destroy(); } });
+        req.on("end", () => resolve(bruto));
+        req.on("error", () => resolve(""));
+    });
+}
 
 export default async function handler(req, res) {
     const url = new URL(req.url, "http://local");
@@ -30,15 +40,40 @@ export default async function handler(req, res) {
         // Os enderecos que voce colou vem em "?minhas=", separados por virgula. Ficam na frente da fila
         // e sao contados a parte no resumo. Teto baixo de proposito: este endpoint e publico, e sem
         // limite ele viraria um scanner de porta para qualquer um apontar onde quisesse.
-        const minhas = lerMinhas(url.searchParams.get("minhas"), numero("MINHAS_TETO", 50));
+        // Por POST tambem, e e por POST que a credencial anda.
+        //
+        // URL com senha dentro entra em registro de servidor, historico do navegador, Referer e cache
+        // compartilhado -- lugares que ninguem limpa e que nao sao seus. Corpo de POST nao vai para
+        // nenhum deles, e a resposta de um POST nao e cacheada. Entao: sem senha, GET serve; com
+        // senha, so POST. Recusar e melhor do que aceitar e a senha acabar num log de CDN.
+        let bruto = url.searchParams.get("minhas");
+        if (req.method === "POST") {
+            const corpo = await lerCorpo(req);
+            try { bruto = JSON.parse(corpo).minhas ?? bruto; }
+            catch { bruto = new URLSearchParams(corpo).get("minhas") ?? bruto; }
+        }
 
-        const { enderecos, paises, origem, resumo, totalUnico } = await juntarFontes({
+        const minhas = lerMinhas(bruto, numero("MINHAS_TETO", 50));
+        const comSenha = temCredencial(minhas);
+
+        if (comSenha && req.method !== "POST") {
+            res.setHeader("cache-control", "no-store");
+            return res.status(400).json({
+                erro: "Endereco com usuario e senha so por POST",
+                porque: "URL com senha dentro fica em registro de servidor, historico e cache compartilhado. "
+                    + "O corpo de um POST nao vai para nenhum desses lugares.",
+                comoFazer: "POST /api/proxies com {\"minhas\": \"user:senha@ip:porta\"} — e o que a propria pagina faz."
+            });
+        }
+
+        const { enderecos, paises, origem, credenciais, resumo, totalUnico } = await juntarFontes({
             prazoFonte: numero("PRAZO_FONTE_MS", 15_000),
             teto: numero("TETO", 40_000),
             minhas
         });
 
         const { aprovadas, contagem, completou } = await checar(enderecos, {
+            credenciais,
             paralelo: numero("PARALELO", 300),
             orcamentoMs: numero("ORCAMENTO_MS", 45_000),
             conectarMs: numero("CONECTAR_MS", 1200),
@@ -54,6 +89,7 @@ export default async function handler(req, res) {
         // So para as APROVADAS (dezenas, nao milhares) e com orcamento proprio: quem nao couber no
         // tempo sai como "??" e continua na lista.
         const geo = await descobrirPaises(aprovadas, paises, {
+            credenciais,
             paralelo: numero("GEO_PARALELO", 60),
             orcamentoMs: numero("GEO_ORCAMENTO_MS", 12_000),
             prazoMs: numero("GEO_PRAZO_MS", 6000)
@@ -72,7 +108,11 @@ export default async function handler(req, res) {
         // E por isto que nao ha cron: o plano gratuito da Vercel aceita no maximo um por dia, e um
         // agendamento mais frequente RECUSA O DEPLOY inteiro em vez de ser ignorado. O cron seria so um
         // piso para quando nao ha ninguem acessando -- nao vale o projeto nao subir.
-        res.setHeader("cache-control", "public, s-maxage=60, stale-while-revalidate=3600");
+        // Resposta de pedido COM CREDENCIAL nao entra em cache nenhum: ela e de uma pessoa so, e um
+        // cache compartilhado guardando isso e uma lista privada servida para o proximo que passar.
+        res.setHeader("cache-control", comSenha
+            ? "private, no-store"
+            : "public, s-maxage=60, stale-while-revalidate=3600");
         res.setHeader("access-control-allow-origin", "*");
 
         if (formato === "txt") {
@@ -93,6 +133,7 @@ export default async function handler(req, res) {
             // Quantas ficaram sem pais. E o numero que explica um ranking cheio de "??" -- em vez de
             // parecer que o site esqueceu de preencher.
             semPais: ranque.filter(p => p.pais === "??").length,
+            senhaRecusada: contagem.senhaRecusada,
             // Quantas voce colou, e quantas delas passaram. E a resposta para "as minhas prestam?", que
             // o total nao dá: la elas ficam misturadas com as gratuitas.
             minhas: minhas.length,

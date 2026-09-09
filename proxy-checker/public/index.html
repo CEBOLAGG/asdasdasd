@@ -109,9 +109,15 @@
       <span class="aviso" id="placaMinhas"></span>
     </div>
     <p style="margin:8px 0 0;color:var(--fraco);font-size:12.5px">
-      Elas entram na FRENTE da fila e sao contadas a parte, para dar para ver se as suas prestam. Ficam
-      guardadas neste navegador e vao junto no endereco que voce cola no plugin. Sem usuario e senha:
-      este site e publico, e proxy com senha vai no campo do proprio plugin.
+      Aceita <code>ip:porta</code>, <code>user:senha@ip:porta</code> e <code>ip:porta:user:senha</code>.
+      Elas entram na FRENTE da fila e sao contadas a parte, para dar para ver se as suas prestam, e ficam
+      guardadas neste navegador.
+    </p>
+    <p style="margin:8px 0 0;color:var(--fraco);font-size:12.5px">
+      <b>Com senha, a proxy e testada mas NAO entra no endereco do plugin.</b> URL com senha dentro fica
+      em registro de servidor, historico e cache compartilhado — lugares que ninguem limpa e que nao sao
+      seus. Aqui ela viaja por POST, que nao vai para nenhum deles. Para usar essa proxy no plugin, cole
+      ela na lista do proprio plugin, que fica na sua maquina.
     </p>
   </div>
 
@@ -159,6 +165,7 @@ function pintar(d) {
   $("placar").innerHTML = [
     caixa("com UDP", d.udp ?? 0, "verde"),
     ...(d.minhas > 0 ? [caixa("suas que passaram", `${d.minhasAprovadas ?? 0}/${d.minhas}`, "verde")] : []),
+    ...(d.senhaRecusada > 0 ? [caixa("senha recusada", d.senhaRecusada, "amarelo")] : []),
     // A que aceita o ASSOCIATE e devolve porta 0 nao entra em "com UDP" -- ela nao entrega datagrama
     // nenhum. Mostrar quantas sao explica na propria tela por que este numero e bem menor que o de
     // baixo, em vez de o numero parecer errado.
@@ -201,8 +208,19 @@ async function carregar(forcar) {
   $("recarregar").disabled = true;
   $("linhas").innerHTML = `<tr><td colspan="6" class="vazio">testando… isso leva algum tempo na primeira vez</td></tr>`;
   try {
-    const p = pedaco();
-    const r = await fetch("/api/proxies" + p + (forcar ? (p === "" ? "?" : "&") + "t=" + Date.now() : ""));
+    const lista = limparLista($("minhas").value);
+    // Com senha vai por POST, e so por POST: e o que mantem a credencial fora de URL, de cache e de
+    // registro de servidor.
+    const r = temSenha(lista)
+      ? await fetch("/api/proxies", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ minhas: lista.join(",") })
+        })
+      : await (() => {
+          const p = pedaco();
+          return fetch("/api/proxies" + p + (forcar ? (p === "" ? "?" : "&") + "t=" + Date.now() : ""));
+        })();
     const d = await r.json();
     if (d.erro) throw new Error(d.erro);
     pintar(d);
@@ -245,21 +263,37 @@ function gravarMinhas(texto) {
 
 // Mesma peneira do servidor, para a tela dizer AGORA quantas valeram em vez de a pessoa descobrir
 // depois de uma varredura inteira.
+// Mesma leitura do servidor: "ip:porta", "user:senha@ip:porta" e "ip:porta:user:senha".
 function limparLista(bruto) {
-  const vistas = new Set();
+  const vistos = new Map();
   for (const pedaco of String(bruto).split(/[\s,;]+/)) {
-    const limpo = pedaco.trim().replace(/^socks5:\/\//i, "");
-    if (limpo === "" || limpo.includes("@") || !/^[\d.]+:\d{1,5}$/.test(limpo)) continue;
-    const porta = Number(limpo.slice(limpo.lastIndexOf(":") + 1));
-    if (porta >= 1 && porta <= 65535) vistas.add(limpo);
-    if (vistas.size >= 50) break;
+    let limpo = pedaco.trim().replace(/^socks5:\/\//i, "");
+    if (limpo === "") continue;
+
+    const quatro = /^([\d.]+):(\d{1,5}):([^:@\s]+):([^:@\s]+)$/.exec(limpo);
+    if (quatro !== null) limpo = `${quatro[3]}:${quatro[4]}@${quatro[1]}:${quatro[2]}`;
+
+    const arroba = limpo.lastIndexOf("@");
+    const endereco = arroba < 0 ? limpo : limpo.slice(arroba + 1);
+    const credencial = arroba < 0 ? "" : limpo.slice(0, arroba);
+    if (!/^[\d.]+:\d{1,5}$/.test(endereco)) continue;
+    const porta = Number(endereco.slice(endereco.lastIndexOf(":") + 1));
+    if (porta < 1 || porta > 65535) continue;
+    if (arroba >= 0 && !/^[^:@\s]+:[^:@\s]+$/.test(credencial)) continue;
+
+    if (!vistos.has(endereco) || credencial !== "") vistos.set(endereco, limpo);
+    if (vistos.size >= 50) break;
   }
-  return [...vistas];
+  return [...vistos.values()];
 }
 
+function temSenha(lista) { return lista.some(e => e.includes("@")); }
+
+// O que pode ir na URL. Endereco com senha NAO vai: URL entra em registro de servidor, historico e
+// cache compartilhado -- lugares que ninguem limpa e que nao sao seus. Ele viaja por POST.
 function pedaco() {
-  const lista = limparLista($("minhas").value);
-  return lista.length === 0 ? "" : "?minhas=" + encodeURIComponent(lista.join(","));
+  const abertas = limparLista($("minhas").value).filter(e => !e.includes("@"));
+  return abertas.length === 0 ? "" : "?minhas=" + encodeURIComponent(abertas.join(","));
 }
 
 // O endereco so existe depois do deploy, entao a pagina monta ele sozinha em vez de pedir para a

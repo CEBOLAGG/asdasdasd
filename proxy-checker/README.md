@@ -35,12 +35,37 @@ npx vercel deploy --prod
 
 Aqui o diretorio ja e a raiz do projeto, entao nao ha o que configurar.
 
+## Suas proxies
+
+A pagina tem uma caixa para colar enderecos seus. Eles entram na **frente da fila** e sao contados a
+parte, para dar para ver se as suas prestam. Ficam guardados no navegador de quem colou, nunca no
+servidor.
+
+Tres formatos: `ip:porta`, `user:senha@ip:porta` e `ip:porta:user:senha`.
+
+**Com senha, so por POST.** URL com credencial dentro fica em registro de servidor, historico do
+navegador, cabecalho `Referer` e cache compartilhado — lugares que ninguem limpa e que nao sao seus.
+Entao um `GET /api/proxies?minhas=user:senha@...` e **recusado com 400**, e a pagina manda por POST
+sozinha quando percebe credencial. Resposta de pedido com senha sai como `private, no-store`: ela e de
+uma pessoa so, e um cache compartilhado guardando isso serviria a lista privada dela para o proximo que
+passasse.
+
+Pelo mesmo motivo, **a proxy com senha nao entra no endereco que voce cola no plugin** — esse endereco
+fica gravado nas settings e viaja em toda requisicao. Para usar uma proxy com senha no plugin, cole ela
+na lista do proprio plugin, que fica na sua maquina.
+
+O checker fala o aperto de mao de usuario e senha do SOCKS5 (RFC 1929), entao `senha recusada` aparece
+como resposta propria no placar: a proxy existe e fala SOCKS5, so nao com essa credencial — que e um
+problema diferente de "endereco morto".
+
 ## Endpoints
 
 | rota | devolve |
 |---|---|
 | `/` | a interface |
 | `/api/proxies` | JSON com contagens, fontes e a lista ordenada |
+| `/api/proxies?minhas=ip:porta,...` | testa as suas junto (sem senha) |
+| `POST /api/proxies` `{"minhas":"user:senha@ip:porta"}` | idem, para as que tem credencial |
 | `/api/proxies?formato=txt` | uma por linha, `socks5://ip:porta` |
 | `/api/proxies?limite=50` | corta a lista |
 
@@ -74,6 +99,7 @@ Se voce estiver no plano Pro e quiser esse piso, acrescente ao `vercel.json`:
 | `TETO` | 40000 | quantos enderecos entram na fila depois de juntar as fontes |
 | `PRAZO_FONTE_MS` | 15000 | prazo para baixar cada lista |
 | `LIMITE` | 0 | corta a resposta (0 = tudo) |
+| `MINHAS_TETO` | 50 | quantos enderecos seus cabem num pedido |
 
 O `maxDuration` esta em 60s no `vercel.json`. Se o seu plano nao permitir, baixe ele e o `ORCAMENTO_MS`
 junto — o checker devolve o que deu tempo de testar e marca `completou: false`, em vez de ser cortado.

@@ -4,7 +4,7 @@
 // porta alta. Entao as proxies sao montadas aqui do lado, uma para cada caso que importa.
 import fs from "node:fs";
 import net from "node:net";
-import { sondar, checar, ranquear, lerFonte, lerMinhas, juntarFontes, descobrirPaises } from "/home/user/asdasdasd/proxy-checker/api/_checker.js";
+import { sondar, checar, ranquear, lerFonte, lerMinhas, temCredencial, partirEndereco, juntarFontes, descobrirPaises } from "/home/user/asdasdasd/proxy-checker/api/_checker.js";
 
 const resultados = [];
 function check(nome, ok, detalhe) {
@@ -21,13 +21,31 @@ function subir(tipo) {
         const s = net.createServer(c => {
             c.on("error", () => c.destroy());
             let etapa = 0;
-            c.on("data", () => {
+            c.on("data", quadro => {
                 if (tipo === "mudo") return;
                 if (etapa === 0) {
                     etapa = 1;
                     if (tipo === "http") return c.write(Buffer.from("HTTP/1.1 400\r\n\r\n"));
-                    if (tipo === "senha") return c.write(Buffer.from([5, 2]));   // 2 = usuario/senha
+                    if (tipo === "senha" || tipo === "login") {
+                        // Uma SOCKS5 de verdade so escolhe um metodo que o cliente OFERECEU. Sem esta
+                        // conferencia o dublê aceitava login de um cliente que nem sabe fazer login --
+                        // e o teste passava mesmo com o plugin oferecendo so "sem autenticacao".
+                        const oferecidos = quadro.subarray(2, 2 + quadro[1]);
+                        if (!oferecidos.includes(2)) return c.write(Buffer.from([5, 0xff]));   // nenhum serve
+                        return c.write(Buffer.from([5, 2]));   // 2 = usuario/senha
+                    }
                     return c.write(Buffer.from([5, 0]));
+                }
+
+                // O dublê "login" exige credencial e aceita UMA: bob/sec. E o unico jeito de o teste
+                // separar "senha certa" de "senha errada" -- que sao respostas diferentes e uteis.
+                if (tipo === "login" && etapa === 1) {
+                    etapa = 2;
+                    const nu = quadro[1];
+                    const usuario = quadro.subarray(2, 2 + nu).toString();
+                    const ns = quadro[2 + nu];
+                    const senha = quadro.subarray(3 + nu, 3 + nu + ns).toString();
+                    return c.write(Buffer.from([1, usuario === "bob" && senha === "sec" ? 0 : 1]));
                 }
                 // resposta ao ASSOCIATE: 0 = aceito, 7 = comando nao suportado
                 //
@@ -54,14 +72,16 @@ function subir(tipo) {
                         Buffer.from([5, 0, 0, 3, nome.length]), nome, Buffer.from([0x04, 0x38])
                     ]));
                 }
-                c.write(Buffer.from([5, tipo === "udp" ? 0 : 7, 0, 1, 127, 0, 0, 1, 4, 56]));
+                // "login" tambem aceita o ASSOCIATE -- depois da senha certa ela e uma proxy boa
+                // como qualquer outra, e e isso que o teste precisa poder afirmar.
+                c.write(Buffer.from([5, tipo === "udp" || tipo === "login" ? 0 : 7, 0, 1, 127, 0, 0, 1, 4, 56]));
             });
         });
         s.listen(0, "127.0.0.1", () => resolve({ porta: s.address().port, fechar: () => s.close() }));
     });
 }
 
-const casos = ["udp", "socks", "senha", "http", "mudo", "morta", "semBind", "dominio", "atypEstranho", "partida"];
+const casos = ["udp", "socks", "senha", "http", "mudo", "morta", "semBind", "dominio", "atypEstranho", "partida", "login"];
 const servidores = {};
 for (const t of casos) servidores[t] = await subir(t);
 const endereco = t => `127.0.0.1:${servidores[t].porta}`;
@@ -79,7 +99,7 @@ check("so as que aceitam ASSOCIATE E devolvem bind usavel sao aprovadas",
     aprovadas.length === 3
     && aprovadas.some(a => a.endereco === endereco("udp"))
     && aprovadas.some(a => a.endereco === endereco("dominio")), JSON.stringify(aprovadas));
-check("a contagem separa as fases", contagem.tcp === 9 && contagem.socks5 === 6 && contagem.udp === 3,
+check("a contagem separa as fases", contagem.tcp === 10 && contagem.socks5 === 6 && contagem.udp === 3,
     JSON.stringify(contagem));
 
 // A porta lida, e nao so a classificacao. 0x0438 = 1080, que e o que os dubles anunciam. Sem cobrar o
@@ -144,6 +164,34 @@ check("e guarda o pais do JSON", paises.get("7.7.7.7:1") === "AR", paises.get("7
 lerFonte("6.6.6.6:1080:Brazil\n", paises);
 check("e o pais por extenso do hideip.me", paises.get("6.6.6.6:1080") === "BR", paises.get("6.6.6.6:1080"));
 
+// ---- proxy com usuario e senha
+//
+// O aperto de mao de credencial do SOCKS5 (RFC 1929). Sem ele, proxy paga -- que e a que costuma
+// funcionar de verdade -- nao tinha como ser testada aqui.
+const comSenhaCerta = await sondar(`bob:sec@${endereco("login")}`, { conectarMs: 800, aperoMs: 1200 });
+check("proxy que exige senha passa com a credencial certa", comSenhaCerta.fase === "udp",
+    `veio ${comSenhaCerta.fase}`);
+check("e o bind e lido igual ao das abertas", comSenhaCerta.bindPorta === 1080, String(comSenhaCerta.bindPorta));
+
+// Senha errada NAO e "endereco morto": a proxy existe e fala SOCKS5, so nao com essa credencial. Sao
+// problemas diferentes, e quem colou a lista precisa saber qual dos dois e o dele.
+const comSenhaErrada = await sondar(`bob:errada@${endereco("login")}`, { conectarMs: 800, aperoMs: 1200 });
+check("senha errada e classificada como senha recusada", comSenhaErrada.fase === "senha_recusada",
+    `veio ${comSenhaErrada.fase}`);
+
+// Sem mandar credencial, a mesma proxy e so uma que exige senha -- o mesmo caso de sempre.
+const semMandar = await sondar(endereco("login"), { conectarMs: 800, aperoMs: 1200 });
+check("sem credencial, ela cai no caso de sempre (exige senha)", semMandar.fase === "tcp",
+    `veio ${semMandar.fase}`);
+
+// A credencial anda AO LADO do endereco, nunca dentro dele: e o que impede ela de entrar em contagem,
+// resumo, cache ou linha de registro sem ninguem perceber.
+check("o endereco e a credencial sao separados",
+    JSON.stringify(partirEndereco("bob:sec@1.2.3.4:1080")) === JSON.stringify({ endereco: "1.2.3.4:1080", usuario: "bob", senha: "sec" }),
+    JSON.stringify(partirEndereco("bob:sec@1.2.3.4:1080")));
+check("e sem credencial o endereco vem inteiro",
+    partirEndereco("1.2.3.4:1080").usuario === null);
+
 // ---- as proxies que a pessoa cola
 //
 // O endpoint e publico: sem peneira e sem teto ele viraria um scanner de porta para qualquer um
@@ -154,8 +202,20 @@ check("separadas por virgula, espaco ou linha",
     lerMinhas("1.1.1.1:1\n2.2.2.2:2;3.3.3.3:3 4.4.4.4:4").length === 4,
     JSON.stringify(lerMinhas("1.1.1.1:1\n2.2.2.2:2;3.3.3.3:3 4.4.4.4:4")));
 // Credencial NAO passa por aqui: mandar usuario e senha para um site publico e pedir para vazar.
-check("recusa endereco com usuario e senha", lerMinhas("user:pw@9.9.9.9:1080").length === 0,
+check("aceita user:senha@ip:porta", lerMinhas("user:pw@9.9.9.9:1080").join() === "user:pw@9.9.9.9:1080",
     JSON.stringify(lerMinhas("user:pw@9.9.9.9:1080")));
+// Formato que muito vendedor entrega. Vira o outro, para so existir uma forma daqui para baixo.
+check("aceita ip:porta:user:senha e converte", lerMinhas("9.9.9.9:1080:bob:sec").join() === "bob:sec@9.9.9.9:1080",
+    JSON.stringify(lerMinhas("9.9.9.9:1080:bob:sec")));
+check("credencial pela metade nao passa",
+    lerMinhas("user@9.9.9.9:1080 :pw@8.8.8.8:1080 user:@7.7.7.7:1080").length === 0,
+    JSON.stringify(lerMinhas("user@9.9.9.9:1080 :pw@8.8.8.8:1080 user:@7.7.7.7:1080")));
+// O mesmo endereco colado duas vezes e uma proxy so, e fica a versao que tem chance de passar.
+check("mesmo endereco com e sem senha vira um so, com a senha",
+    lerMinhas("9.9.9.9:1080 bob:sec@9.9.9.9:1080").join() === "bob:sec@9.9.9.9:1080",
+    JSON.stringify(lerMinhas("9.9.9.9:1080 bob:sec@9.9.9.9:1080")));
+check("temCredencial separa as duas listas",
+    temCredencial(lerMinhas("bob:sec@9.9.9.9:1080")) === true && temCredencial(lerMinhas("9.9.9.9:1080")) === false);
 check("recusa lixo e porta fora da faixa", lerMinhas("lixo 10.0.0.1:70000 10.0.0.2:0").length === 0,
     JSON.stringify(lerMinhas("lixo 10.0.0.1:70000 10.0.0.2:0")));
 check("nao repete endereco", lerMinhas("1.2.3.4:1080 1.2.3.4:1080").length === 1);
