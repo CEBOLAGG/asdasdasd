@@ -4,7 +4,7 @@
 // porta alta. Entao as proxies sao montadas aqui do lado, uma para cada caso que importa.
 import fs from "node:fs";
 import net from "node:net";
-import { sondar, checar, ranquear, lerFonte, descobrirPaises } from "/home/user/asdasdasd/proxy-checker/api/_checker.js";
+import { sondar, checar, ranquear, lerFonte, lerMinhas, juntarFontes, descobrirPaises } from "/home/user/asdasdasd/proxy-checker/api/_checker.js";
 
 const resultados = [];
 function check(nome, ok, detalhe) {
@@ -143,6 +143,32 @@ check("le JSON com pais", lerFonte(JSON.stringify([{ ip: "7.7.7.7", port: 1, geo
 check("e guarda o pais do JSON", paises.get("7.7.7.7:1") === "AR", paises.get("7.7.7.7:1"));
 lerFonte("6.6.6.6:1080:Brazil\n", paises);
 check("e o pais por extenso do hideip.me", paises.get("6.6.6.6:1080") === "BR", paises.get("6.6.6.6:1080"));
+
+// ---- as proxies que a pessoa cola
+//
+// O endpoint e publico: sem peneira e sem teto ele viraria um scanner de porta para qualquer um
+// apontar onde quisesse, com o IP do site na frente.
+check("le ip:porta e socks5://", lerMinhas("1.2.3.4:1080, socks5://5.6.7.8:9050").join() === "1.2.3.4:1080,5.6.7.8:9050",
+    JSON.stringify(lerMinhas("1.2.3.4:1080, socks5://5.6.7.8:9050")));
+check("separadas por virgula, espaco ou linha",
+    lerMinhas("1.1.1.1:1\n2.2.2.2:2;3.3.3.3:3 4.4.4.4:4").length === 4,
+    JSON.stringify(lerMinhas("1.1.1.1:1\n2.2.2.2:2;3.3.3.3:3 4.4.4.4:4")));
+// Credencial NAO passa por aqui: mandar usuario e senha para um site publico e pedir para vazar.
+check("recusa endereco com usuario e senha", lerMinhas("user:pw@9.9.9.9:1080").length === 0,
+    JSON.stringify(lerMinhas("user:pw@9.9.9.9:1080")));
+check("recusa lixo e porta fora da faixa", lerMinhas("lixo 10.0.0.1:70000 10.0.0.2:0").length === 0,
+    JSON.stringify(lerMinhas("lixo 10.0.0.1:70000 10.0.0.2:0")));
+check("nao repete endereco", lerMinhas("1.2.3.4:1080 1.2.3.4:1080").length === 1);
+check("e tem teto", lerMinhas(Array.from({ length: 80 }, (_, i) => `10.0.0.${i}:1080`).join(","), 50).length === 50);
+check("texto vazio nao vira nada", lerMinhas("").length === 0 && lerMinhas(null).length === 0);
+
+// As suas entram na FRENTE: quem colou um endereco quer ele testado, e nao no fim de uma fila de
+// milhares. E como fonte propria, senao sumiriam dentro do numero das listas publicas.
+const comMinhas = await juntarFontes({ prazoFonte: 8000, teto: 200, minhas: ["203.0.113.7:1080", "198.51.100.9:9050"] });
+check("as suas vao para a frente da fila",
+    comMinhas.enderecos.slice(0, 2).includes("203.0.113.7:1080"), comMinhas.enderecos.slice(0, 4).join(","));
+check("e aparecem como fonte propria no resumo",
+    comMinhas.resumo.some(f => f.fonte === "suas" && f.total === 2), JSON.stringify(comMinhas.resumo.find(f => f.fonte === "suas")));
 
 // ---- descobrir o pais nao pode custar proxy da lista
 //

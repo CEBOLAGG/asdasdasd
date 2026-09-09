@@ -10,7 +10,7 @@
 // A conta cara e feita UMA vez e servida do cache da CDN. Sem isso, cada visita a pagina dispararia
 // uma varredura de dezenas de milhares de enderecos -- o que, alem de lento, viraria um pequeno ataque
 // contra as listas publicas.
-import { juntarFontes, checar, ranquear, descobrirPaises } from "./_checker.js";
+import { juntarFontes, checar, ranquear, descobrirPaises, lerMinhas } from "./_checker.js";
 
 // De onde saem os numeros: da variavel de ambiente quando houver, senao de um padrao conservador que
 // cabe no tempo de funcao do plano gratuito.
@@ -27,9 +27,15 @@ export default async function handler(req, res) {
     try {
         const comecou = Date.now();
 
+        // Os enderecos que voce colou vem em "?minhas=", separados por virgula. Ficam na frente da fila
+        // e sao contados a parte no resumo. Teto baixo de proposito: este endpoint e publico, e sem
+        // limite ele viraria um scanner de porta para qualquer um apontar onde quisesse.
+        const minhas = lerMinhas(url.searchParams.get("minhas"), numero("MINHAS_TETO", 50));
+
         const { enderecos, paises, origem, resumo, totalUnico } = await juntarFontes({
             prazoFonte: numero("PRAZO_FONTE_MS", 15_000),
-            teto: numero("TETO", 40_000)
+            teto: numero("TETO", 40_000),
+            minhas
         });
 
         const { aprovadas, contagem, completou } = await checar(enderecos, {
@@ -87,6 +93,10 @@ export default async function handler(req, res) {
             // Quantas ficaram sem pais. E o numero que explica um ranking cheio de "??" -- em vez de
             // parecer que o site esqueceu de preencher.
             semPais: ranque.filter(p => p.pais === "??").length,
+            // Quantas voce colou, e quantas delas passaram. E a resposta para "as minhas prestam?", que
+            // o total nao dá: la elas ficam misturadas com as gratuitas.
+            minhas: minhas.length,
+            minhasAprovadas: ranque.filter(p => p.fonte === "suas").length,
             geo,
             fontes: resumo,
             // O que este checker NAO prova, dito no proprio corpo da resposta para nao virar

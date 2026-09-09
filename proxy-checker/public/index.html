@@ -63,6 +63,17 @@
   .fonte.caiu { border-color: #4a2b2e; color: var(--vermelho); }
   .vazio { color: var(--fraco); padding: 26px; text-align: center; }
 
+  .minhas textarea {
+    width: 100%; box-sizing: border-box; resize: vertical; min-height: 76px;
+    background: var(--fundo); color: var(--texto);
+    border: 1px solid var(--borda); border-radius: 6px; padding: 8px 10px;
+    font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .minhas .barra { margin: 8px 0 0; }
+  .placa { font-size: 12.5px; margin-top: 8px; }
+  .placa.bom { color: var(--verde); }
+  .placa.ruim { color: var(--vermelho); }
+
   .ligar { background: var(--painel); border: 1px solid var(--borda); border-left: 3px solid var(--verde);
            border-radius: 8px; padding: 13px 15px; margin: 16px 0 4px; }
   .ligar b { display: block; margin-bottom: 7px; }
@@ -86,6 +97,22 @@
     <button id="baixar">Baixar .txt</button>
     <button id="recarregar">Recarregar</button>
     <span class="aviso" id="quando"></span>
+  </div>
+
+  <div class="caixa minhas" style="margin-bottom:16px">
+    <b style="display:block;margin-bottom:7px">Suas proxies</b>
+    <textarea id="minhas" spellcheck="false"
+      placeholder="ip:porta, uma por linha&#10;tambem aceita socks5://ip:porta e separadas por virgula"></textarea>
+    <div class="barra">
+      <button class="principal" id="usarMinhas">Testar junto</button>
+      <button id="limparMinhas">Limpar</button>
+      <span class="aviso" id="placaMinhas"></span>
+    </div>
+    <p style="margin:8px 0 0;color:var(--fraco);font-size:12.5px">
+      Elas entram na FRENTE da fila e sao contadas a parte, para dar para ver se as suas prestam. Ficam
+      guardadas neste navegador e vao junto no endereco que voce cola no plugin. Sem usuario e senha:
+      este site e publico, e proxy com senha vai no campo do proprio plugin.
+    </p>
   </div>
 
   <div class="ligar">
@@ -131,6 +158,7 @@ function pintar(d) {
 
   $("placar").innerHTML = [
     caixa("com UDP", d.udp ?? 0, "verde"),
+    ...(d.minhas > 0 ? [caixa("suas que passaram", `${d.minhasAprovadas ?? 0}/${d.minhas}`, "verde")] : []),
     // A que aceita o ASSOCIATE e devolve porta 0 nao entra em "com UDP" -- ela nao entrega datagrama
     // nenhum. Mostrar quantas sao explica na propria tela por que este numero e bem menor que o de
     // baixo, em vez de o numero parecer errado.
@@ -173,7 +201,8 @@ async function carregar(forcar) {
   $("recarregar").disabled = true;
   $("linhas").innerHTML = `<tr><td colspan="6" class="vazio">testando… isso leva algum tempo na primeira vez</td></tr>`;
   try {
-    const r = await fetch("/api/proxies" + (forcar ? "?t=" + Date.now() : ""));
+    const p = pedaco();
+    const r = await fetch("/api/proxies" + p + (forcar ? (p === "" ? "?" : "&") + "t=" + Date.now() : ""));
     const d = await r.json();
     if (d.erro) throw new Error(d.erro);
     pintar(d);
@@ -200,16 +229,78 @@ $("baixar").onclick = () => {
   URL.revokeObjectURL(url);
 };
 
+// ---- suas proxies
+//
+// Guardadas neste navegador. O servidor nao lembra de ninguem: ele so testa o que vem no endereco, e e
+// por isso que elas tambem entram no endereco que voce cola no plugin -- senao valeriam so aqui.
+const CHAVE = "glb.minhas";
+
+function lerMinhas() {
+  try { return localStorage.getItem(CHAVE) ?? ""; } catch { return ""; }
+}
+
+function gravarMinhas(texto) {
+  try { localStorage.setItem(CHAVE, texto); } catch { /* aba anonima, ou site bloqueado: segue sem guardar */ }
+}
+
+// Mesma peneira do servidor, para a tela dizer AGORA quantas valeram em vez de a pessoa descobrir
+// depois de uma varredura inteira.
+function limparLista(bruto) {
+  const vistas = new Set();
+  for (const pedaco of String(bruto).split(/[\s,;]+/)) {
+    const limpo = pedaco.trim().replace(/^socks5:\/\//i, "");
+    if (limpo === "" || limpo.includes("@") || !/^[\d.]+:\d{1,5}$/.test(limpo)) continue;
+    const porta = Number(limpo.slice(limpo.lastIndexOf(":") + 1));
+    if (porta >= 1 && porta <= 65535) vistas.add(limpo);
+    if (vistas.size >= 50) break;
+  }
+  return [...vistas];
+}
+
+function pedaco() {
+  const lista = limparLista($("minhas").value);
+  return lista.length === 0 ? "" : "?minhas=" + encodeURIComponent(lista.join(","));
+}
+
 // O endereco so existe depois do deploy, entao a pagina monta ele sozinha em vez de pedir para a
 // pessoa adivinhar qual e. E o JSON, nao o ?formato=txt: o texto puro nao carrega o pais.
-const meuEndereco = location.origin + "/api/proxies";
-$("minhaUrl").textContent = meuEndereco;
+function enderecoAtual() { return location.origin + "/api/proxies" + pedaco(); }
+
+function pintarEndereco() { $("minhaUrl").textContent = enderecoAtual(); }
+
+$("minhas").value = lerMinhas();
+pintarEndereco();
 
 $("copiarUrl").onclick = async () => {
-  await navigator.clipboard.writeText(meuEndereco);
+  await navigator.clipboard.writeText(enderecoAtual());
   const b = $("copiarUrl");
   b.textContent = "Copiado";
   setTimeout(() => { b.textContent = "Copiar"; }, 1400);
+};
+
+$("minhas").oninput = () => pintarEndereco();
+
+$("usarMinhas").onclick = () => {
+  const lista = limparLista($("minhas").value);
+  const linhas = $("minhas").value.split(/[\s,;]+/).filter(t => t.trim() !== "").length;
+  gravarMinhas($("minhas").value);
+  pintarEndereco();
+
+  const placa = $("placaMinhas");
+  placa.className = "aviso placa " + (lista.length > 0 ? "bom" : "ruim");
+  placa.textContent = lista.length === 0
+    ? (linhas === 0 ? "Nada colado." : `Nenhuma das ${linhas} linhas e um ip:porta valido.`)
+    : `${lista.length} guardada(s)` + (linhas > lista.length ? `, ${linhas - lista.length} descartada(s)` : "") + " — testando";
+  if (lista.length > 0) carregar(true);
+};
+
+$("limparMinhas").onclick = () => {
+  $("minhas").value = "";
+  gravarMinhas("");
+  pintarEndereco();
+  $("placaMinhas").className = "aviso placa";
+  $("placaMinhas").textContent = "Limpo.";
+  carregar(true);
 };
 
 $("recarregar").onclick = () => carregar(true);

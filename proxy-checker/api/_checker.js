@@ -105,7 +105,31 @@ async function baixar(url, prazoMs) {
     return resposta.text();
 }
 
-export async function juntarFontes({ prazoFonte = 20_000, teto = 40_000 } = {}) {
+// Le enderecos colados a mao. Mesmos formatos que as listas publicas usam, porque e de la que as
+// pessoas copiam: "ip:porta", "socks5://ip:porta", separados por virgula, espaco ou quebra de linha.
+export function lerMinhas(bruto, teto = 50) {
+    if (typeof bruto !== "string" || bruto.trim() === "") return [];
+
+    const vistas = new Set();
+    for (const pedaco of bruto.split(/[\s,;]+/)) {
+        const limpo = pedaco.trim().replace(/^socks5:\/\//i, "");
+        if (limpo === "") continue;
+        // So numero, ponto e a porta -- nada mais.
+        //
+        // Isto tambem e o que barra credencial: "user:pw@1.2.3.4:1080" nao passa, e nao pode passar.
+        // Este checker so aprova proxy aberta, e mandar usuario e senha para um site publico seria
+        // pedir para vazar. Quem tem proxy com senha usa o campo do proprio plugin, que fica na
+        // maquina dela. Nao ha um teste separado para o "@" porque nao ha uma regra separada: e esta.
+        if (!/^[\d.]+:\d{1,5}$/.test(limpo)) continue;
+        const porta = Number(limpo.slice(limpo.lastIndexOf(":") + 1));
+        if (porta < 1 || porta > 65535) continue;
+        vistas.add(limpo);
+        if (vistas.size >= teto) break;
+    }
+    return [...vistas];
+}
+
+export async function juntarFontes({ prazoFonte = 20_000, teto = 40_000, minhas = [] } = {}) {
     const paises = new Map();
     const origem = new Map();
 
@@ -116,6 +140,17 @@ export async function juntarFontes({ prazoFonte = 20_000, teto = 40_000 } = {}) 
     const vistas = new Set();
     const porFonte = [];
     const resumo = [];
+
+    // As suas entram PRIMEIRO, e como fonte propria.
+    //
+    // Primeiro porque quem colou um endereco quer ele testado, e nao no fim de uma fila de milhares.
+    // Como fonte propria porque assim o resumo mostra quantas voce mandou e quantas eram novas -- do
+    // contrario elas sumiriam dentro do numero das listas publicas.
+    if (minhas.length > 0) {
+        for (const endereco of minhas) { vistas.add(endereco); origem.set(endereco, "suas"); }
+        porFonte.push([...minhas]);
+        resumo.push({ fonte: "suas", erro: false, total: minhas.length, novas: minhas.length });
+    }
 
     for (const r of respostas) {
         if (r.status !== "fulfilled") {
