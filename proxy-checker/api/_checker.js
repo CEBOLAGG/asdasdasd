@@ -518,15 +518,26 @@ export function ranquear(aprovadas, paises, origem) {
     return aprovadas
         .map(({ endereco, ms }) => {
             const pais = paises.get(endereco) ?? "??";
+            const fonte = origem.get(endereco) ?? "?";
             return {
                 proxy: `socks5://${endereco}`,
                 ms,
                 pais,
-                fonte: origem.get(endereco) ?? "?",
+                fonte,
+                // Esta e SUA: veio do campo "suas proxies", e nao de lista publica. O plugin le esta
+                // marca para escolher as suas antes das gratuitas.
+                minha: fonte === "suas",
                 // Quanto menor, melhor. O pais multiplica em vez de decidir antes: uma vizinha bem mais
                 // rapida tem que poder ganhar de uma americana lenta.
                 pontos: Math.round(ms * fatorDePais(pais))
             };
         })
-        .sort((a, b) => a.pontos - b.pontos);
+        // As suas na frente, sempre -- e entre elas, a melhor primeiro.
+        //
+        // Nao e desempate: e preferencia mesmo. Quem colou uma proxy propria pagou por ela e sabe de
+        // onde ela sai; uma gratuita de lista publica e um endereco que respondeu hoje e pode sumir na
+        // hora seguinte. Ordenar as duas pelo mesmo numero seria tratar como iguais duas coisas que
+        // ninguem trata como iguais. Elas so chegam ate aqui depois de PASSAR no teste, entao a
+        // preferencia nunca poe uma proxy quebrada na frente.
+        .sort((a, b) => (a.minha === b.minha ? 0 : a.minha ? -1 : 1) || a.pontos - b.pontos);
 }

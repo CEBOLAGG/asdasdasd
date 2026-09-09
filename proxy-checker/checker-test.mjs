@@ -155,6 +155,29 @@ check("mas uma distante MUITO mais rapida ganha",
 check("a saida ja vem no formato que o plugin le",
     ranque.every(p => /^socks5:\/\/\d+(\.\d+){3}:\d+$/.test(p.proxy)), ranque[0].proxy);
 
+// ---- as SUAS na frente, sempre
+//
+// Quem colou uma proxy propria escolheu aquela: sabe de onde ela sai e provavelmente pagou por ela. Uma
+// gratuita e um endereco que respondeu hoje. Ordenar as duas pela mesma nota seria tratar como iguais
+// duas coisas que ninguem trata como iguais -- e ai ter proxy propria nao adiantaria nada, porque a
+// gratuita mais rapida do momento ganharia sempre.
+const misturado = ranquear(
+    [{ endereco: "6.6.6.6:6", ms: 700 }, { endereco: "7.7.7.7:7", ms: 80 }, { endereco: "8.8.8.8:8", ms: 400 }],
+    new Map([["6.6.6.6:6", "US"], ["7.7.7.7:7", "US"], ["8.8.8.8:8", "US"]]),
+    new Map([["6.6.6.6:6", "suas"], ["8.8.8.8:8", "suas"]])
+);
+check("a sua vem na frente mesmo sendo bem mais lenta", misturado[0].proxy === "socks5://8.8.8.8:8",
+    misturado.map(p => `${p.fonte}:${p.ms}`).join(" "));
+check("entre as suas, a melhor primeiro",
+    misturado.slice(0, 2).map(p => p.proxy).join(",") === "socks5://8.8.8.8:8,socks5://6.6.6.6:6",
+    misturado.map(p => p.proxy).join(","));
+check("a gratuita rapida vem depois, e nao some",
+    misturado[2].proxy === "socks5://7.7.7.7:7", misturado.map(p => p.proxy).join(","));
+check("e cada linha diz se e sua, para o plugin e a tabela poderem mostrar",
+    misturado.filter(p => p.minha === true).length === 2
+    && misturado.find(p => p.proxy === "socks5://7.7.7.7:7").minha === false,
+    JSON.stringify(misturado.map(p => [p.proxy, p.minha])));
+
 // ---- leitura dos formatos das fontes
 const paises = new Map();
 check("le ip:porta puro", lerFonte("9.9.9.9:1080\nlixo\n", paises).join() === "9.9.9.9:1080");

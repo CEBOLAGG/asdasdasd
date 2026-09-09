@@ -57,6 +57,10 @@
     border-radius: 6px; padding: 11px 14px; color: var(--fraco); font-size: 12.5px; margin: 18px 0;
   }
   .nota b { color: var(--texto); font-weight: 600; }
+  /* As suas ficam no topo e marcadas. Sem a marca, uma sua de 700ms na frente de uma gratuita de
+     300ms le-se como tabela desordenada -- e o motivo verdadeiro (preferencia) fica invisivel. */
+  tr.minha td { background: #101a2c; }
+  tr.minha b { color: var(--azul, #5865f2); font-weight: 600; }
   .fontes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
   .fonte { background: var(--painel); border: 1px solid var(--borda); border-radius: 20px; padding: 3px 11px; font-size: 12px; color: var(--fraco); }
   .fonte b { color: var(--texto); font-weight: 600; }
@@ -87,7 +91,7 @@
 <body>
 <div class="capa">
   <h1>Proxy Checker</h1>
-  <p class="sub">Junta sete listas publicas de SOCKS5, testa cada endereco e devolve so o que respondeu — ordenado por latencia e proximidade. A lista se renova a cada minuto.</p>
+  <p class="sub">Junta oito listas publicas de SOCKS5, testa cada endereco e devolve so o que respondeu — as suas primeiro, e o resto ordenado por latencia e proximidade. A lista se renova a cada minuto.</p>
 
   <div class="placar" id="placar"></div>
   <div class="fontes" id="fontes"></div>
@@ -110,8 +114,10 @@
     </div>
     <p style="margin:8px 0 0;color:var(--fraco);font-size:12.5px">
       Aceita <code>ip:porta</code>, <code>user:senha@ip:porta</code> e <code>ip:porta:user:senha</code>.
-      Elas entram na FRENTE da fila e sao contadas a parte, para dar para ver se as suas prestam, e ficam
+      Elas entram na FRENTE da fila, sao contadas a parte — para dar para ver se as suas prestam — e ficam
       guardadas neste navegador.
+      <b>As que passarem vao para o topo da lista, e o plugin usa elas antes de qualquer gratuita.</b>
+      Uma gratuita e um endereco que respondeu hoje e pode sumir amanha; a sua voce escolheu.
     </p>
     <p style="margin:8px 0 0;color:var(--fraco);font-size:12.5px">
       <b>Com senha, a proxy e testada mas NAO entra no endereco do plugin.</b> URL com senha dentro fica
@@ -190,13 +196,13 @@ function pintar(d) {
   const linhas = (d.proxies || []);
   $("linhas").innerHTML = linhas.length === 0
     ? `<tr><td colspan="6" class="vazio">nenhuma passou nesta rodada</td></tr>`
-    : linhas.map((p, i) => `<tr>
+    : linhas.map((p, i) => `<tr class="${p.minha ? "minha" : ""}">
         <td class="num">${i + 1}</td>
         <td class="mono">${p.proxy}</td>
         <td>${p.pais}</td>
         <td class="num">${p.ms} ms</td>
         <td class="num">${p.pontos}</td>
-        <td>${p.fonte}</td>
+        <td>${p.fonte}${p.minha ? " <b>sua</b>" : ""}</td>
       </tr>`).join("");
 }
 
